@@ -1,6 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { FaMapMarkerAlt, FaSearch, FaTools, FaStar, FaPhone, FaEnvelope, FaUser, FaHome, FaCalendarAlt, FaUserCircle, FaSignOutAlt, FaQuestionCircle, FaRegComments, FaRegThumbsUp, FaEdit, FaTimes, FaCheck } from 'react-icons/fa';
+import React, { useState, useEffect, useRef } from 'react';
+import { FaMapMarkerAlt, FaSearch, FaTools, FaStar, FaPhone, FaEnvelope, FaUser, FaHome, FaCalendarAlt, FaUserCircle, FaSignOutAlt, FaQuestionCircle, FaRegComments, FaRegThumbsUp, FaEdit, FaTimes, FaCheck, FaToolbox, FaClock } from 'react-icons/fa';
 import './CustomerDashboard.css';
+import ProviderModal from "./ProviderModal";
+
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
 
 const categories = [
   { id: 'all', name: 'All Services' },
@@ -11,21 +27,23 @@ const categories = [
   { id: 'appliance', name: 'Appliance Repair' }
 ];
 
-const mockPastBookings = [
-  // You can keep this for testing or remove if you want to fetch bookings from backend
-  // { ...mockServiceProviders[1], bookingDate: "2025-09-25" },
-  // { ...mockServiceProviders[2], bookingDate: "2025-09-20" }
-];
+
+async function geocodeAddress(address) {
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
+  const data = await res.json();
+  if (data && data.length > 0) {
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  }
+  return null;
+}
 
 const CustomerDashboard = () => {
-  // Location state (address as text)
   const [location, setLocation] = useState('');
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [locationInput, setLocationInput] = useState('');
   const [latLng, setLatLng] = useState(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
 
-  // This will be set from backend (dynamic)
   const [serviceProviders, setServiceProviders] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -34,28 +52,33 @@ const CustomerDashboard = () => {
   const [phoneInput, setPhoneInput] = useState('');
   const [connectedProvider, setConnectedProvider] = useState(null);
 
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
+
+  const [modalBooking, setModalBooking] = useState(null);
+
+  const [modalScrollTop, setModalScrollTop] = useState(0);
+  const [selectedServices, setSelectedServices] = useState({});
+  const [showModal, setShowModal] = useState(false);
+  const [modalProvider, setModalProvider] = useState(null);
+ 
   useEffect(() => {
     const fetchProviders = async () => {
       try {
-        // Fetch all providers from backend. Assumes array of provider objects.
         const res = await fetch('http://localhost:8087/users/providers');
         if (!res.ok) throw new Error('Failed to fetch providers');
         const providers = await res.json();
-
-        // If the backend returns a single object, convert it to array:
         const providersArray = Array.isArray(providers) ? providers : [providers];
-
         setServiceProviders(providersArray);
       } catch (error) {
         console.error('Error fetching providers:', error);
         setServiceProviders([]);
       }
     };
-
     fetchProviders();
   }, []);
 
-  // Location function (OpenStreetMap, editable)
+
+  // Get geolocation and address using OpenStreetMap Nominatim
   useEffect(() => {
     setIsLoadingLocation(true);
     if (navigator.geolocation) {
@@ -64,18 +87,21 @@ const CustomerDashboard = () => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
           setLatLng({ lat, lng });
-
-          // Fetch address from OpenStreetMap Nominatim
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
             .then(response => response.json())
             .then(data => {
-              setLocation(data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-              setLocationInput(data.display_name || '');
+              const locationText = data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+              setLocation(locationText);
+              setLocationInput(locationText);
               setIsLoadingLocation(false);
+              saveLocationToBackend(locationText);
             })
             .catch(err => {
-              setLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+              const locationText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+              setLocation(locationText);
+              setLocationInput(locationText);
               setIsLoadingLocation(false);
+              saveLocationToBackend(locationText);
             });
         },
         (error) => {
@@ -87,129 +113,306 @@ const CustomerDashboard = () => {
       setLocation('Geolocation not supported.');
       setIsLoadingLocation(false);
     }
-    // Only run once on mount
-    // eslint-disable-next-line
   }, []);
 
-  // Filtering providers for Home page search (category logic updated)
+
+  const [customerBookings, setCustomerBookings] = useState([]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    fetch('http://localhost:8087/bookings/customer/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    })
+      .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch bookings'))
+      .then(data => {
+        setCustomerBookings(data); // Array of bookings received from backend
+      })
+      .catch(err => {
+        console.error('Error fetching customer bookings:', err);
+        setCustomerBookings([]);
+      });
+  }, []);
+
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('No token found. Please login.');
+      return;
+    }
+    fetch('http://localhost:8087/users/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+      })
+      .then(data => {
+        // Backend should return { name, email, phone }
+        setCurrentUser({
+          name: data.name || '',
+          email: data.email || '',
+          phone: data.phone || ''
+        });
+        setPhoneInput(data.phone || '');
+      })
+      .catch(err => {
+        console.error('Error fetching user:', err);
+      });
+  }, []);
+
+
+  useEffect(() => {
+    async function fetchAndGeocodeProviders() {
+      try {
+        const res = await fetch('http://localhost:8087/users/providers');
+        const providers = await res.json();
+        const providersArray = Array.isArray(providers) ? providers : [providers];
+
+        // Geocode each provider's location field
+        const providersWithCoords = await Promise.all(
+          providersArray.map(async (provider) => {
+            const coords = provider.location
+              ? await geocodeAddress(provider.location)
+              : null;
+            return coords
+              ? { ...provider, ...coords }
+              : provider;
+          })
+        );
+        setServiceProviders(providersWithCoords);
+      } catch (error) {
+        console.error('Error fetching providers:', error);
+        setServiceProviders([]);
+      }
+    }
+
+    fetchAndGeocodeProviders();
+  }, []);
+
   const filteredProviders = serviceProviders.filter(provider => {
-    // Category filtering based on provider name (case-insensitive)
     let matchesCategory = true;
     if (selectedCategory !== 'all') {
-      matchesCategory = provider.name && provider.name.toLowerCase().includes(selectedCategory);
+      matchesCategory = provider.category && provider.category.toLowerCase().includes(selectedCategory);
     }
-    // Search filtering by location/address (case-insensitive)
     const matchesSearch = (provider.location || '').toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
-  // Remove connected provider from "other services"
-  const otherProviders = connectedProvider
-    ? filteredProviders.filter(p => p.id !== connectedProvider.id)
-    : filteredProviders;
+  
+  const bookedProviderIds = new Set(
+    customerBookings
+      .filter(b => b.status) // status is assigned
+      .map(b => b.providerId) // assuming booking has providerId
+  );
+  
+  const homeProviders = filteredProviders.filter(
+    p => !bookedProviderIds.has(p.id)
+  );
 
-  const handleConnect = (provider) => {
-    setConnectedProvider(provider);
-    setActivePage('home');
+
+const handleConnect = (provider, bookingDate, selectedServicesFromModal, selectedSlot) => {
+  // Prepare the booked services object
+  const bookedServices = {};
+  Object.entries(selectedServicesFromModal || {})
+    .filter(([name, checked]) => checked)
+    .forEach(([name]) => {
+      bookedServices[name] = provider.subcategory[name];
+    });
+
+  // Create the new booking object as expected in your booking cards
+  const newBooking = {
+    bookingId: Date.now(), // Or get from backend later
+    providerId: provider.id,
+    status: "PENDING",
+    bookingDate,
+    timeSlot: selectedSlot,
+    bookedServices,
   };
+
+  setCustomerBookings(prev => [...prev, newBooking]);
+  setActivePage('bookings');
+  setShowModal(false); // Close the modal
+};
 
   const handleLogout = () => {
     localStorage.removeItem('currentUser');
     window.location.href = '/login';
   };
 
-  const handlePhoneSave = () => {
+
+  const savePhoneToBackend = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('No token found. Please login.');
+      return;
+    }
+    try {
+      const response = await fetch('http://localhost:8087/users/me/phone', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ phone: phoneInput }),
+      });
+      if (!response.ok) throw new Error('Failed to save phone');
+    } catch (error) {
+      alert('Phone update failed: ' + error.message);
+    }
+  };
+
+  const handlePhoneSave = async () => {
     setCurrentUser(prev => ({ ...prev, phone: phoneInput }));
     localStorage.setItem('currentUser', JSON.stringify({ ...currentUser, phone: phoneInput }));
+    setIsEditingPhone(false);
+    await savePhoneToBackend();
     alert("Phone number saved!");
   };
 
-  // Edit Location Button
+  const saveLocationToBackend = async (locationText) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('No token found. Please login.');
+      return;
+    }
+    try {
+      const response = await fetch('http://localhost:8087/users/me/location', {
+        method: 'PUT', // or POST if your backend expects it
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ location: locationText }),
+      });
+      if (!response.ok) throw new Error('Failed to save location');
+      // optionally show a success message here
+    } catch (error) {
+      alert('Location update failed: ' + error.message);
+    }
+  };
+
+
   const handleEditLocation = () => {
     setLocationInput(location);
     setIsEditingLocation(true);
   };
 
-  // Save Location Button
-  const handleSaveLocation = () => {
-    setLocation(locationInput);
+   const handleSaveLocation = () => {
+    const trimmed = locationInput.trim();
+    if (trimmed === '') {
+      setIsEditingLocation(false);
+      return;
+    }
+
+    // update UI immediately
+    setLocation(trimmed);
     setIsEditingLocation(false);
+
+    // save to backend like your old code (no optimistic-revert logic)
+    saveLocationToBackend(trimmed).catch(err => {
+      console.error('Failed to save location', err);
+      alert('Failed to save location. Please try again.');
+    });
   };
 
-  // Wide Card for connected provider
-  const WideProviderCard = ({ provider, showBookingDate }) => (
-    <div className="customer-wide-card" style={{
-      width: "100%",
-      background: "#fff",
-      borderRadius: "1rem",
-      boxShadow: "0 2px 16px rgba(80,36,143,0.12)",
-      marginBottom: "2rem",
-      padding: "2.1rem 2.8rem",
-      display: "flex",
-      alignItems: "center",
-      gap: "2.8rem",
-      justifyContent: "flex-start"
-    }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 700, fontSize: "1.37rem", marginBottom: "0.5rem" }}>
-          {provider.name}
-        </div>
-        {(provider.rating || provider.reviews) && (
-          <div style={{ marginBottom: "0.4rem", display: "flex", alignItems: "center" }}>
-            <FaStar style={{ color: "#fbbf24", marginRight: "0.25rem" }} />
-            {provider.rating} ({provider.reviews} reviews)
-          </div>
-        )}
-        <div style={{ marginBottom: "0.4rem", display: "flex", alignItems: "center" }}>
-          <FaMapMarkerAlt style={{ marginRight: "0.5em" }} /> 
-          {provider.location}
-        </div>
-        <div style={{ marginBottom: "0.4rem", color: "#555" }}>
-          <strong>Description:</strong> {provider.description}
-        </div>
-        <div style={{ marginBottom: "0.4rem", color: "#555" }}>
-          <strong>Availability:</strong> 
-          {provider.availability?.from ? provider.availability.from : ''} 
-          {provider.availability?.to ? ` to ${provider.availability.to}` : ''}
-        </div>
-        <div style={{ marginBottom: "0.3rem", display: "flex", alignItems: "center" }}>
-          <FaPhone style={{ marginRight: "0.5em" }} /> {provider.phone} &nbsp;
-        </div>
-        <div style={{ marginBottom: "0.5rem", display: "flex", alignItems: "center" }}> 
-          <FaEnvelope style={{ marginRight: "0.5em" }}/> {provider.email}
-        </div>
-        {showBookingDate && (
-          <div style={{ marginTop: "0.5rem", fontWeight: 500, display: "flex", alignItems: "center" }}>
-            <FaCalendarAlt style={{ marginRight: "0.5em" }} />
-            {provider.bookingDate || "2025-10-13"}
-          </div>
+  const handleSeeDetails = (provider) => {
+    setModalProvider(provider);
+    setShowModal(true);
+    setModalBooking(null);
+    // Reset selectedServices for all catalog services to false!
+    const initialState = {};
+    if (provider && provider.subcategory) {
+      Object.keys(provider.subcategory).forEach(svc => initialState[svc] = false);
+    }
+    setSelectedServices(initialState);
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setModalProvider(null);
+  };
+
+  const WideProviderCard = ({ provider, booking, onSeeDetails }) => (
+    <div className="provider-card">
+      <div className="provider-info">
+        <h3><b>{provider.name}</b></h3>
+        <p className="category-info"><FaToolbox /> <b>{provider.category}</b></p>
+        <p className="distance">
+          <FaMapMarkerAlt color="#cf1616ff" className="map-icon" /> {
+            (() => {
+              const maxWords = 5;
+              const words = (provider.location || "").split(" ");
+              const truncated = words.slice(0, maxWords).join(" ");
+              return words.length > maxWords ? truncated + "..." : truncated;
+            })()
+          }
+        </p>
+        <p className="contact-info"><FaPhone /> {provider.phone}</p>
+        <p className="contact-info"><FaEnvelope /> {provider.email}</p>
+        {booking && (
+          <>
+            <div className="booking-date">
+              <FaCalendarAlt /> {booking.bookingDate}
+              <FaClock /> {booking.timeSlot}
+            </div>
+          </>
         )}
       </div>
+      {/* Status display */}
+        {booking && booking.status && (
+          <div className="card-info-item accepted-status">
+            Status:
+            <span
+              className={`accepted-status-label status-${booking.status.toLowerCase().replace(/ /g, "-")}`}
+            >
+              {booking.status}
+            </span>
+          </div>
+        )}
+      <button
+        className="connect-button"
+        onClick={onSeeDetails}
+        disabled={provider.available === false}
+      >
+        {provider.available === false ? 'Currently Unavailable' : 'See Details'}
+      </button>
     </div>
   );
-  
-  // Card component for other services
+
+
   const ProviderCard = ({ provider, showBookingDate }) => (
     <div className="provider-card">
       <div className="provider-info">
-        <h3>{provider.name}</h3>
-        {(provider.rating || provider.reviews) && (
-          <div className="rating">
-            <FaStar /> {provider.rating} ({provider.reviews} reviews)
-          </div>
-        )}
-        <p className="distance" style={{ display: "flex", alignItems: "center", gap: "0.5em" }}>
-          <FaMapMarkerAlt /> {provider.location}</p>
-        <p style={{ display: "flex", alignItems: "center", gap: "0.5em" }}>
-          <FaPhone /> {provider.phone}</p>
-        <p style={{ display: "flex", alignItems: "center", gap: "0.5em" }}>
-          <FaEnvelope /> {provider.email}</p>
-        <p className="description">
-          <strong>Description:</strong> {provider.description}</p>
-        <p><strong>Availability:</strong> 
-          {provider.availability?.from ? provider.availability.from : ''} 
-          {provider.availability?.to ? ` to ${provider.availability.to}` : ''}
+        <h3><b>{provider.name}</b></h3>
+        <div className="rating">
+          <FaStar className="star-icon" />
+          {provider.rating ? provider.rating : "4.5"} ({provider.reviews ? provider.reviews : "120"} reviews)
+        </div>
+        <p className="category-info"><FaToolbox /> <b>{provider.category}</b></p>
+        <p className="distance">
+          <FaMapMarkerAlt color="#cf1616ff" className="map-icon" /> {
+            (() => {
+              const maxWords = 5;
+              const words = (provider.location || "").split(" ");
+              const truncated = words.slice(0, maxWords).join(" ");
+              return words.length > maxWords ? truncated + "..." : truncated;
+            })()
+          }
         </p>
+        
+        <p className="contact-info"><FaPhone /> {provider.phone}</p>
+        <p className="contact-info"><FaEnvelope /> {provider.email}</p>
         {showBookingDate && (
           <div className="booking-date">
             <FaCalendarAlt /> {provider.bookingDate}
@@ -218,28 +421,24 @@ const CustomerDashboard = () => {
       </div>
       <button
         className="connect-button"
-        onClick={() => handleConnect(provider)}
+        onClick={() => handleSeeDetails(provider)}
         disabled={provider.available === false}
       >
-        {provider.available === false ? 'Currently Unavailable' : 'Connect Now'}
+        {provider.available === false ? 'Currently Unavailable' : 'See Details'}
       </button>
     </div>
   );
-  
 
   useEffect(() => {
-    // Get current user from localStorage
     const userData = JSON.parse(localStorage.getItem('currentUser'));
     if (userData) {
       setCurrentUser(userData);
       setPhoneInput(userData.phone || '');
     }
-    // Providers are fetched from backend in first useEffect
   }, []);
 
   return (
     <div className="dashboard-root">
-      {/* Side Panel */}
       <div className="sidebar">
         <div className="sidebar-title">FixItNow</div>
         <div className="sidebar-subtitle">CUSTOMER</div>
@@ -264,54 +463,24 @@ const CustomerDashboard = () => {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="dashboard-main">
-        {/* Home */}
         {activePage === 'home' && (
           <div>
             <div className="dashboard-header">
               <h1 className="dashboard-header-bold-white">Find Services Near You</h1>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "100%",
-                  margin: "1.4em 0 1.2em 0"
-                }}
-              >
-                <FaMapMarkerAlt style={{ fontSize: "1.2em", marginRight: "0.7em", color: "#222" }} />
+              <div className="location-row">
+                <FaMapMarkerAlt className="map-icon location-icon" />
                 {!isEditingLocation ? (
                   <>
-                    <div style={{
-                      flex: 1,
-                      textAlign: "center",
-                      fontWeight: 600,
-                      fontSize: "1em",
-                      color: "#f0f0f0ea"
-                    }}>
+                    <div className="location-text">
                       {isLoadingLocation ? "Fetching location..." : location}
                     </div>
                     <button
                       className="edit-location-btn"
-                      style={{
-                        width: "38px",
-                        height: "38px",
-                        minWidth: "38px",
-                        maxWidth: "38px",
-                        border: "none",
-                        borderRadius: "10px",
-                        marginLeft: "1em",
-                        background: "#7c4dff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer"
-                      }}
                       onClick={handleEditLocation}
                       title="Edit address"
                     >
-                      <FaEdit style={{ fontSize: "1.18em", color: "#fff" }} />
+                      <FaEdit />
                     </button>
                   </>
                 ) : (
@@ -321,56 +490,21 @@ const CustomerDashboard = () => {
                       value={locationInput}
                       onChange={e => setLocationInput(e.target.value)}
                       placeholder="Enter your address"
-                      style={{
-                        flex: 1,
-                        textAlign: "center",
-                        padding: "0.5em",
-                        borderRadius: "0.5em",
-                        fontSize: "1em",
-                        marginRight: "1em",
-                        marginLeft: "0.4em"
-                      }}
+                      className="location-input"
                     />
                     <button
-                      className="edit-location-btn"
-                      style={{
-                        width: "38px",
-                        height: "38px",
-                        minWidth: "38px",
-                        maxWidth: "38px",
-                        border: "none",
-                        borderRadius: "10px",
-                        background: "#4fd1c5",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        marginRight: "0.5em",
-                        cursor: "pointer"
-                      }}
+                      className="edit-location-btn save-btn"
                       onClick={handleSaveLocation}
                       title="Save address"
                     >
-                      <FaCheck style={{ fontSize: "1.18em", color: "#fff" }} />
+                      <FaCheck />
                     </button>
                     <button
-                      className="edit-location-btn"
-                      style={{
-                        width: "38px",
-                        height: "38px",
-                        minWidth: "38px",
-                        maxWidth: "38px",
-                        border: "none",
-                        borderRadius: "10px",
-                        background: "#e53e3e",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer"
-                      }}
+                      className="edit-location-btn cancel-btn"
                       onClick={() => setIsEditingLocation(false)}
                       title="Cancel"
                     >
-                      <FaTimes style={{ fontSize: "1.18em", color: "#fff" }} />
+                      <FaTimes />
                     </button>
                   </>
                 )}
@@ -381,10 +515,35 @@ const CustomerDashboard = () => {
                 <FaSearch />
                 <input
                   type="text"
-                  placeholder="Search by location (address)..."
+                  placeholder="Search by location..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                 />
+              </div>
+              <div style={{ margin: "2em 0" }}>
+                <MapContainer
+                  center={[
+                    homeProviders[0]?.lat || 20,
+                    homeProviders[0]?.lng || 80
+                  ]}
+                  zoom={4}
+                  style={{ height: '400px', width: '100%', borderRadius: '1em' }}
+                >
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution="&copy; OpenStreetMap contributors"
+                  />
+                  {homeProviders.map((provider) =>
+                    provider.lat && provider.lng ? (
+                      <Marker key={provider.id} position={[provider.lat, provider.lng]}>
+                        <Popup>
+                          <strong>{provider.name}</strong><br />
+                          {provider.location}
+                        </Popup>
+                      </Marker>
+                    ) : null
+                  )}
+                </MapContainer>
               </div>
               <div className="categories no-scroll">
                 {categories.map(category => (
@@ -399,17 +558,13 @@ const CustomerDashboard = () => {
                 ))}
               </div>
             </div>
-            {/* Connected wide card */}
-            {connectedProvider && (
-              <WideProviderCard provider={connectedProvider} />
-            )}
-            {/* Other services */}
+            
             <div>
-              {connectedProvider && otherProviders.length > 0 && (
+              {connectedProvider && homeProviders.length > 0 && (
                 <h2 className="dashboard-header-bold-white" style={{ fontSize: '1.25rem', marginBottom: '1rem' }}>Other Services</h2>
               )}
               <div className="providers-grid">
-                {otherProviders.map(provider => (
+                {homeProviders.map(provider => (
                   <ProviderCard key={provider.id} provider={provider} />
                 ))}
               </div>
@@ -417,47 +572,123 @@ const CustomerDashboard = () => {
           </div>
         )}
 
-        {/* Bookings */}
         {activePage === 'bookings' && (
           <div className="bookings-page">
             <h2 className="dashboard-header-bold-white">Current Bookings</h2>
             <div className="providers-grid">
-              {connectedProvider && <WideProviderCard provider={connectedProvider} showBookingDate />}
+              {customerBookings
+                .filter(booking => booking.status === "PENDING" || booking.status === "CONFIRMED" || booking.status === "IN_PROGRESS")
+                .map((booking, idx) => {
+                  const provider = serviceProviders.find(p => p.id === booking.providerId);
+                  if (!provider) return null; // skip if provider not found
+                  return (
+                    <WideProviderCard
+                      key={booking.bookingId || idx}
+                      provider={provider}
+                      booking={booking}
+                      onSeeDetails={() => {
+                        setModalProvider(provider);
+                        setShowModal(true);
+                        setModalBooking(booking); // new state to hold booking info
+                      }}
+                    />
+                  );
+                })
+              }
             </div>
             <h2 className="dashboard-header-bold-white">Past Bookings</h2>
             <div className="providers-grid">
-              {mockPastBookings.map(provider => (
-                <ProviderCard key={provider.id} provider={provider} showBookingDate />
-              ))}
+              {customerBookings.filter(booking => booking.status === "COMPLETED" || booking.status === "CANCELLED").length === 0 ? (
+                <div className="no-bookings-text">
+                  No past bookings.
+                </div>
+              ) : (
+                customerBookings
+                .filter(booking => booking.status === "COMPLETED" || booking.status === "CANCELLED")
+                .map((booking, idx) => {
+                  const provider = serviceProviders.find(p => p.id === booking.providerId);
+                  if (!provider) return null; // skip if provider not found
+                  return (
+                    <WideProviderCard
+                      key={booking.bookingId || idx}
+                      provider={provider}
+                      booking={booking}
+                      onSeeDetails={() => {
+                        setModalProvider(provider);
+                        setShowModal(true);
+                        setModalBooking(booking); // new state to hold booking info
+                      }}
+                    />
+                  );
+                })
+              )}
             </div>
           </div>
         )}
 
-        {/* Profile */}
+        {showModal && (
+          <ProviderModal
+            provider={modalProvider}
+            booking={modalBooking}             // Pass booking object!
+            viewingBooking={!!modalBooking}
+            onClose={handleCloseModal}
+            selectedServices={selectedServices}
+            setSelectedServices={setSelectedServices}
+            modalScrollTop={modalScrollTop}
+            setModalScrollTop={setModalScrollTop}
+            handleConnect={handleConnect}
+          />
+        )}
+
+        {/* Profile (same as before) */}
         {activePage === 'profile' && (
           <div className="profile-page">
-            {/* Section 1: Profile Info */}
-            <div className="profile-info-box">
-              <div className="profile-info-left">
-                <FaUserCircle size={90} />
-              </div>
+            {/* Section 1: Profile Details */}
+            <div className="profile-info-box wide-profile-box">
               <div className="profile-info-right">
+                <h2 className="profile-reviews-heading" style={{fontSize: '1.33rem', marginBottom: '0.7rem'}}>Profile Details</h2>
                 <div className="profile-info-item"><strong>Name:</strong> {currentUser.name}</div>
                 <div className="profile-info-item"><strong>Email:</strong> {currentUser.email}</div>
+                {/* Phone */}
                 <div className="profile-info-item phone-box-wide">
                   <label htmlFor="phone"><strong>Phone Number:</strong></label>
                   <input
                     id="phone"
                     type="tel"
+                    disabled={!isEditingPhone}
                     placeholder="Add phone number"
                     value={phoneInput}
                     onChange={e => setPhoneInput(e.target.value)}
                   />
-                  <button className="save-phone-button" onClick={handlePhoneSave}>Save</button>
+                  {phoneInput.length !== 10 && isEditingPhone && (
+                    <span style={{ color: 'red', fontSize: '0.96rem', marginLeft: '0.6rem' }}>Phone number must be 10 digits</span>
+                  )}
+                </div>
+                
+                
+                {/* Edit & Save Buttons */}
+                <div style={{display: 'flex', gap: '1rem', marginTop: '1rem'}}>
+                  <button
+                    className="accept-request-btn"
+                    style={{background: '#6b46c1'}}
+                    onClick={() => setIsEditingPhone(true)}
+                    disabled={isEditingPhone}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="save-phone-button"
+                    style={{background:'#2b6cb0'}}
+                    onClick={handlePhoneSave}
+                    disabled={!isEditingPhone || phoneInput.length !== 10}
+                  >
+                    Save
+                  </button>
                 </div>
               </div>
             </div>
-            {/* Section 2: Actions */}
+
+
             <div className="profile-actions-box">
               <button className="profile-wide-action-btn">
                 <FaQuestionCircle className="profile-action-icon" /> Help
