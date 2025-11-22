@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaMapMarkerAlt, FaSearch, FaTools, FaStar, FaPhone, FaEnvelope, FaUser, FaHome, FaCalendarAlt, FaUserCircle, FaSignOutAlt, FaQuestionCircle, FaRegComments, FaRegThumbsUp, FaEdit, FaTimes, FaCheck, FaToolbox, FaClock } from 'react-icons/fa';
+import { FaMapMarkerAlt, FaSearch, FaTools, FaStar, FaPhone, FaEnvelope, FaFacebookMessenger, FaExclamationTriangle, FaUser, FaHome, FaCalendarAlt, FaUserCircle, FaSignOutAlt, FaQuestionCircle, FaRegComments, FaRegThumbsUp, FaEdit, FaTimes, FaCheck, FaToolbox, FaClock, FaMoneyBillWave } from 'react-icons/fa';
 import './CustomerDashboard.css';
 import ProviderModal from "./ProviderModal";
+import ChatPanel from "./ChatPanel";
+import Sidebar from "./Sidebar"
 
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -10,13 +12,13 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: markerIcon2x,
   iconUrl: markerIcon,
   shadowUrl: markerShadow,
 });
-
 
 const categories = [
   { id: 'all', name: 'All Services' },
@@ -26,7 +28,6 @@ const categories = [
   { id: 'cleaning', name: 'Cleaning' },
   { id: 'appliance', name: 'Appliance Repair' }
 ];
-
 
 async function geocodeAddress(address) {
   const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
@@ -48,6 +49,15 @@ const CustomerDashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [currentUser, setCurrentUser] = useState({ name: 'Customer Name', email: 'customer@email.com', phone: '' });
+  const [userData, setUserData] = useState(null);
+
+  const customerMenu = [
+      { key: "home", label: "Home", icon: <FaHome /> },
+      { key: "bookings", label: "Bookings", icon: <FaCalendarAlt /> },
+      { key: "Chat", label: "Messages", icon: <FaFacebookMessenger /> },
+      { key: "profile", label: "Profile", icon: <FaUserCircle /> },
+    ];
+
   const [activePage, setActivePage] = useState('home');
   const [phoneInput, setPhoneInput] = useState('');
   const [connectedProvider, setConnectedProvider] = useState(null);
@@ -55,6 +65,18 @@ const CustomerDashboard = () => {
   const [isEditingPhone, setIsEditingPhone] = useState(false);
 
   const [modalBooking, setModalBooking] = useState(null);
+
+  const [myReports, setMyReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [reportsError, setReportsError] = useState(null);
+
+
+  const [showReportForm, setShowReportForm] = useState(false);
+  const [reportText, setReportText] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+
+  const [reportBookingId, setReportBookingId] = useState('');
+  const [refundBookingId, setRefundBookingId] = useState('');
 
   const [modalScrollTop, setModalScrollTop] = useState(0);
   const [selectedServices, setSelectedServices] = useState({});
@@ -158,13 +180,18 @@ const CustomerDashboard = () => {
         return res.json();
       })
       .then(data => {
-        // Backend should return { name, email, phone }
+        // Backend should return { id, name, email, phone }
         setCurrentUser({
           name: data.name || '',
           email: data.email || '',
           phone: data.phone || ''
         });
         setPhoneInput(data.phone || '');
+        // store user id for chat endpoints and local use
+        if (data.id) {
+          setUserData({ id: data.id, name: data.name, email: data.email });
+          localStorage.setItem('userId', data.id);
+        }
       })
       .catch(err => {
         console.error('Error fetching user:', err);
@@ -200,25 +227,285 @@ const CustomerDashboard = () => {
     fetchAndGeocodeProviders();
   }, []);
 
+
+
+  const getProviderNameById = (id) => {
+    if (!id) return id;
+    const p = (serviceProviders || []).find(s =>
+      String(s.id) === String(id) ||
+      String(s.provider?.id) === String(id) ||
+      String(s.providerId) === String(id)
+    );
+    if (!p) return id;
+    return p.provider?.name || p.name || p.category || id;
+  };
+
+  // Fetch reports for the logged-in customer
+  useEffect(() => {
+    const loadMyReports = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setReportsError('Not authenticated');
+        return;
+      }
+
+      setLoadingReports(true);
+      setReportsError(null);
+
+      try {
+        const res = await fetch('http://localhost:8087/api/reports/customer', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`${res.status} ${text || res.statusText}`);
+        }
+
+        const data = await res.json();
+        setMyReports(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Failed to load reports', err);
+        setReportsError(err.message || 'Failed to load reports');
+        setMyReports([]);
+      } finally {
+        setLoadingReports(false);
+      }
+    };
+
+    loadMyReports();
+  }, [serviceProviders]);
+
+
+
+  const reportsOnly = React.useMemo(() => {
+    if (!Array.isArray(myReports)) return [];
+    return myReports.filter(r => String(r.category || '').trim().toUpperCase() === 'REPORT');
+  }, [myReports]);
+
+  const refundsOnly = React.useMemo(() => {
+    if (!Array.isArray(myReports)) return [];
+    return myReports.filter(r => String(r.category || '').trim().toUpperCase() === 'REFUND');
+  }, [myReports]);
+
+
+  // Chat-specific state for customers
+  const [conversations, setConversations] = useState([]); // { peerId, peerName, lastMessage }
+  const [selectedPeer, setSelectedPeer] = useState(null);
+  const [selectedPeerName, setSelectedPeerName] = useState('');
+  const [loadingConversations, setLoadingConversations] = useState(false);
+
+  // only show providers that are approved (and match category/search)
   const filteredProviders = serviceProviders.filter(provider => {
+    // require provider to be approved for the home list
+    const isApproved = (provider?.verified ?? '').toString().toLowerCase() === 'approved';
+
+    if (!isApproved) return false;
+
     let matchesCategory = true;
     if (selectedCategory !== 'all') {
       matchesCategory = provider.category && provider.category.toLowerCase().includes(selectedCategory);
     }
     const matchesSearch = (provider.location || '').toLowerCase().includes(searchQuery.toLowerCase());
+
     return matchesCategory && matchesSearch;
   });
+  
+  // consider these statuses as "active" bookings that should hide a provider
+  const ACTIVE_BOOKING_STATUSES = new Set([
+    'PENDING',
+    'CONFIRMED',
+    'IN_PROGRESS',
+  ]);
 
-  
-  const bookedProviderIds = new Set(
-    customerBookings
-      .filter(b => b.status) // status is assigned
-      .map(b => b.providerId) // assuming booking has providerId
+  const activeBookedProviderIds = new Set(
+    (customerBookings || [])
+      .filter(b => {
+        if (!b || !b.status) return false;
+        const s = String(b.status).trim().toUpperCase();
+        return ACTIVE_BOOKING_STATUSES.has(s);
+      })
+      .map(b => String(b.providerId))
   );
+
+  const homeProviders = filteredProviders.filter(p => {
+    const pid = String(p.id ?? '');
+    return !activeBookedProviderIds.has(pid);
+  });
   
-  const homeProviders = filteredProviders.filter(
-    p => !bookedProviderIds.has(p.id)
-  );
+
+  const reportBookingOptions = React.useMemo(() => {
+    if (!Array.isArray(customerBookings)) return [];
+    return customerBookings.map(b => {
+      const providerName = getProviderNameById(b.providerId);
+      const formattedDate = b.bookingDate ? (new Date(b.bookingDate)).toLocaleString() : '';
+      const label = `${providerName}${formattedDate ? ` — ${formattedDate}` : ''}`;
+      return {
+        bookingId: b.bookingId ?? b.id ?? '',
+        providerId: b.providerId,
+        label,
+        status: b.status
+      };
+    }).filter(opt => opt.bookingId); 
+  }, [customerBookings, serviceProviders]);
+
+  const [showRefundForm, setShowRefundForm] = useState(false);
+
+  const refundBookingOptions = React.useMemo(() => {
+    return reportBookingOptions.filter(opt => String(opt.status || '').trim().toLowerCase() === 'cancelled');
+  }, [reportBookingOptions]);
+
+  const handleSubmitReportOrRefund = async (category = "REPORT", bookingIdArg = null) => {
+    const bookingId = bookingIdArg ?? reportBookingId;
+    const reporterId = (userData && userData.id) || localStorage.getItem('userId');
+
+    if (!reporterId) {
+      alert('You are not logged in. Please login to submit.');
+      return;
+    }
+    if (!bookingId) {
+      alert('Please select a booking from the dropdown.');
+      return;
+    }
+    if (!reportText || !reportText.trim()) {
+      alert('Please enter your complaint/reason before submitting.');
+      return;
+    }
+
+    const booking = (customerBookings || []).find(b => String(b.bookingId ?? b.id) === String(bookingId));
+    const reportedOnId = booking?.providerId ?? booking?.provider?.id ?? null;
+    if (!reportedOnId) {
+      const optFromList = reportBookingOptions.find(o => String(o.bookingId) === String(bookingId));
+      if (optFromList) reportedOnId = optFromList.providerId;
+    }
+    if (!reportedOnId) {
+      alert('Could not determine provider for selected booking. Please try again.');
+      return;
+    }
+
+    setReportSubmitting(true);
+    try {
+      const url = 'http://localhost:8087/api/reports'; 
+      const token = localStorage.getItem('token');
+      const payload = {
+        reportedById: reporterId,
+        reportedOnId: reportedOnId,
+        reason: reportText.trim(),
+        category: String(category).toUpperCase(),
+        bookingId: bookingId
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        console.error('Submit failed', res.status, text);
+        alert(`Failed to submit: ${res.status} ${text || res.statusText}`);
+        return;
+      }
+
+      const resp = await res.json().catch(() => null);
+      console.log('Created report/refund:', resp);
+
+      setReportText('');
+      setReportBookingId('');
+      setRefundBookingId('');
+      setShowReportForm(false);
+      setShowRefundForm(false);
+      alert('Submitted successfully.');
+
+    } catch (err) {
+      console.error('Network error submitting:', err);
+      alert('Network error while submitting. Check console.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+  
+  useEffect(() => {
+    const ADMIN_PEER_ID = 'U10';
+    const ADMIN_PEER_NAME = 'Admin';
+
+    const loadConversations = async () => {
+      const token = localStorage.getItem('token');
+      const customerId = userData?.id || localStorage.getItem('userId');
+      if (!customerId) return;
+
+      setLoadingConversations(true);
+      try {
+        const url = `http://localhost:8087/api/chat/conversations?userId=${encodeURIComponent(customerId)}`;
+        const res = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        let arr = [];
+        if (res.ok) {
+          arr = await res.json();
+        } else {
+          // if server returns error, keep arr empty and still inject admin conv below
+          const raw = await res.text().catch(() => '');
+          console.warn('Conversations fetch failed', res.status, raw);
+          arr = [];
+        }
+
+        // Normalize server results to { peerId, peerName, lastMessage, lastAt }
+        const convsFromServer = (arr || []).map(c => ({
+          peerId: c.peerId,
+          peerName: c.peerName || c.peer_name || c.peer || c.peerId,
+          lastMessage: c.lastMessage || c.last_message || '',
+          lastAt: c.lastAt || c.last_at || ''
+        }));
+
+        // Ensure admin conversation is present. If server already returned admin conv, keep it.
+        const hasAdmin = convsFromServer.some(c => String(c.peerId) === String(ADMIN_PEER_ID));
+        const finalConvs = hasAdmin
+          ? convsFromServer
+          : // put admin at top
+            [{ peerId: ADMIN_PEER_ID, peerName: ADMIN_PEER_NAME, lastMessage: '', lastAt: '' }, ...convsFromServer];
+
+        // Remove duplicates by peerId (keeping first occurrence)
+        const seen = new Set();
+        const dedup = [];
+        for (const c of finalConvs) {
+          const pid = String(c.peerId);
+          if (!seen.has(pid)) {
+            seen.add(pid);
+            dedup.push(c);
+          }
+        }
+        setConversations(dedup);
+
+      } catch (err) {
+        console.error('Failed loading conversations', err);
+        // Even if fetch fails, still show the admin conv so customers can message Admin
+        setConversations([{ peerId: ADMIN_PEER_ID, peerName: ADMIN_PEER_NAME, lastMessage: '', lastAt: '' }]);
+      } finally {
+        setLoadingConversations(false);
+      }
+    };
+
+    if (activePage === 'Chat') {
+      loadConversations();
+      const interval = setInterval(() => {
+        loadConversations().catch(() => {});
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activePage, userData]);
 
 
 const handleConnect = (provider, bookingDate, selectedServicesFromModal, selectedSlot) => {
@@ -430,38 +717,23 @@ const handleConnect = (provider, bookingDate, selectedServicesFromModal, selecte
   );
 
   useEffect(() => {
-    const userData = JSON.parse(localStorage.getItem('currentUser'));
-    if (userData) {
-      setCurrentUser(userData);
-      setPhoneInput(userData.phone || '');
+    const userDataStored = JSON.parse(localStorage.getItem('currentUser'));
+    if (userDataStored) {
+      setCurrentUser(userDataStored);
+      setPhoneInput(userDataStored.phone || '');
     }
   }, []);
 
   return (
     <div className="dashboard-root">
-      <div className="sidebar">
-        <div className="sidebar-title">FixItNow</div>
-        <div className="sidebar-subtitle">CUSTOMER</div>
-        <nav className="sidebar-nav">
-          <button className={activePage === 'home' ? 'active' : ''}
-                  onClick={() => setActivePage('home')}>
-            <FaHome /> Home
-          </button>
-          <button className={activePage === 'bookings' ? 'active' : ''}
-                  onClick={() => setActivePage('bookings')}>
-            <FaCalendarAlt /> Bookings
-          </button>
-          <button className={activePage === 'profile' ? 'active' : ''}
-                  onClick={() => setActivePage('profile')}>
-            <FaUserCircle /> Profile
-          </button>
-        </nav>
-        <div className="sidebar-bottom">
-          <button className="logout-button" onClick={handleLogout}>
-            <FaSignOutAlt /> Logout
-          </button>
-        </div>
-      </div>
+      {/* Sidebar */}
+        <Sidebar
+          activeTab={activePage}
+          onActivate={(k) => setActivePage(k)}
+          menu={customerMenu}        
+          showLogoOnCollapsed={true}
+          handleLogout={() => {handleLogout()}}
+        />
 
       <div className="dashboard-main">
         {activePage === 'home' && (
@@ -571,6 +843,53 @@ const handleConnect = (provider, bookingDate, selectedServicesFromModal, selecte
             </div>
           </div>
         )}
+
+        {/* Chat Page */}
+        {activePage === 'Chat' && (
+          <div className="chat-page">
+            <div className="chat-sidebar">
+              <h3>Messages</h3>
+              {loadingConversations ? (
+                <div style={{ color: '#666' }}>Loading...</div>
+              ) : (
+                <div className="conversations-list">
+                  {conversations.length === 0 ? (
+                    <div style={{ color: '#999' }}>No conversations yet.</div>
+                  ) : (
+                    conversations.map(conv => (
+                      <button
+                        key={conv.peerId}
+                        onClick={() => { setSelectedPeer(conv.peerId); setSelectedPeerName(conv.peerName || conv.peerId); }}
+                        className={`conversation-btn ${selectedPeer === conv.peerId ? 'active' : ''}`}
+                        type="button"
+                      >
+                        <div className="conversation-peer">{conv.peerName || conv.peerId}</div>
+                        <div className="conversation-preview">{conv.lastMessage}</div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="chat-main">
+              {selectedPeer ? (
+                <ChatPanel
+                  currentUserId={userData?.id || localStorage.getItem('userId')}
+                  peerId={selectedPeer}
+                  peerName={selectedPeerName}
+                  onBack={() => setSelectedPeer(null)}
+                />
+              ) : (
+                <div className="chat-empty">
+                  <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>No conversation selected</div>
+                  <div>Select a person from the left to view and reply to messages.</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
 
         {activePage === 'bookings' && (
           <div className="bookings-page">
@@ -693,9 +1012,240 @@ const handleConnect = (provider, bookingDate, selectedServicesFromModal, selecte
               <button className="profile-wide-action-btn">
                 <FaQuestionCircle className="profile-action-icon" /> Help
               </button>
-              <button className="profile-wide-action-btn">
-                <FaRegThumbsUp className="profile-action-icon" /> Reviews & Ratings
-              </button>
+              <div className="report-container">
+                <button
+                  className="profile-wide-action-btn"
+                  onClick={() => setShowReportForm(prev => !prev)}
+                >
+                  <FaExclamationTriangle className="profile-action-icon" /> Report
+                </button>
+
+                {showReportForm && (
+                  <div id="customer-report-form" className="report-form">
+                    {/* Report form */}
+                    <label className="report-field">
+                      <div className="report-label">Select booking</div>
+                      <select
+                        value={reportBookingId}
+                        onChange={(e) => setReportBookingId(e.target.value)}
+                      >
+                        <option value="">-- select booking --</option>
+                        {reportBookingOptions.length === 0 ? (
+                          <option value="" disabled>No bookings found</option>
+                        ) : (
+                          reportBookingOptions.map(opt => (
+                            <option key={opt.bookingId} value={opt.bookingId}>
+                              {opt.label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+
+                    <label className="report-field">
+                      <div className="report-label">Complaint</div>
+                      <textarea
+                        rows={4}
+                        value={reportText}
+                        onChange={(e) => setReportText(e.target.value)}
+                        placeholder="Describe your complaint..."
+                      />
+                    </label>
+
+                    <div className="report-actions">
+                      <button
+                        className="report-submit-btn"
+                        onClick={() => handleSubmitReportOrRefund('REPORT')}
+                        disabled={reportSubmitting || !reportBookingId || !reportText.trim()}
+                      >
+                        {reportSubmitting ? 'Submitting…' : 'Submit'}
+                      </button>
+                      <button
+                        className="report-cancel-btn"
+                        onClick={() => { setShowReportForm(false); setReportText(''); setReportBookingId(''); }}
+                        disabled={reportSubmitting}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    
+                    <div className="profile-reports-box" style={{ marginTop: 18 }}>
+                      <h3 style={{ marginBottom: 10 }}>My Reports</h3>
+
+                      {loadingReports ? (
+                        <div style={{ color: '#666' }}>Loading your reports…</div>
+                      ) : reportsError ? (
+                        <div style={{ color: 'red' }}>Error: {reportsError}</div>
+                      ) : reportsOnly.length === 0 ? (
+                        <div style={{ color: '#666' }}>You have not submitted any reports.</div>
+                      ) : (
+                        <div style={{ display: 'grid', gap: 12 }}>
+                          {reportsOnly.map((r) => (
+                            <div key={r.id ?? `${r.reportedOnId}-${r.createdAt}`} className="report-card">
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+                                <div style={{ fontWeight: 700 }}>
+                                  {getProviderNameById(r.reportedOnId)}{r.bookingId ? ` — ${r.bookingId}` : ''}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <div style={{ color: '#666', fontSize: 12 }}>{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</div>
+                                  <div className={`report-status ${String(r.status || '').toLowerCase()}`}>{r.status}</div>
+                                </div>
+                              </div>
+                              {/* Reason text */}
+                              <div style={{ marginTop: 8, color: '#222' }}>
+                                {r.reason}
+                              </div>
+
+                              {/* Admin reply (if any). Checks several common property names */}
+                              {(r.reply || r.adminReply || r.response || r.admin_reply) && (
+                                <div className="admin-reply">
+                                  <div className="admin-reply-label">Admin reply</div>
+                                  <div className="admin-reply-text">
+                                    {r.reply ?? r.adminReply ?? r.response ?? r.admin_reply}
+                                  </div>
+
+                                  {/* optional reply timestamp if backend provides one */}
+                                  {(r.replyAt || r.repliedAt || r.replied_at) && (
+                                    <div className="admin-reply-time">
+                                      {new Date(r.replyAt ?? r.repliedAt ?? r.replied_at).toLocaleString()}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Report / Refund id */}
+                              <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                                Report ID: {r.id}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div> 
+                  </div>   
+                )}
+            
+              </div>
+              {/* Refund Request button and form */}
+              <div style={{ display: 'inline-block', marginLeft: 8 }}>
+                <button
+                  className="profile-wide-action-btn"
+                  onClick={() => setShowRefundForm(prev => !prev)}                  
+                >
+                  <FaMoneyBillWave className="profile-action-icon" /> Refund Request
+                </button>
+
+                {showRefundForm && (
+                  <div id="customer-report-form" className="report-form">
+                    {/* Refund form */}
+                    <label className="report-field">
+                      <div className="report-label">Select cancelled booking</div>
+                      <select
+                        value={refundBookingId}
+                        onChange={(e) => setRefundBookingId(e.target.value)}
+                      >
+                        <option value="">-- select booking --</option>
+                        {refundBookingOptions.length === 0 ? (
+                          <option value="" disabled>No bookings</option>
+                        ) : (
+                          refundBookingOptions.map(opt => (
+                            <option key={opt.bookingId} value={opt.bookingId}>
+                              {opt.label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+
+                    <label className="report-field">
+                      <div className="report-label">Reason for Refund</div>
+                      <textarea
+                        rows={4}
+                        value={reportText}
+                        onChange={(e) => setReportText(e.target.value)}
+                        placeholder="Describe your reason..."
+                      />
+                    </label>
+
+                    <div className="report-actions">
+                      <button
+                        className="report-submit-btn"
+                        onClick={() => handleSubmitReportOrRefund('REFUND', refundBookingId)}
+                        disabled={reportSubmitting || !refundBookingId || !reportText.trim()}
+                      >
+                        {reportSubmitting ? 'Submitting…' : 'Submit'}
+                      </button>
+                      <button
+                        className="report-cancel-btn"
+                        onClick={() => {
+                          setShowRefundForm(false);
+                          setRefundBookingId('');
+                        }}
+                        disabled={reportSubmitting}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div className="profile-reports-box" style={{ marginTop: 18 }}>
+                      <h3 style={{ marginBottom: 10 }}>My Refund Requests</h3>
+
+                      {loadingReports ? (
+                        <div style={{ color: '#666' }}>Loading your requests…</div>
+                      ) : reportsError ? (
+                        <div style={{ color: 'red' }}>Error: {reportsError}</div>
+                      ) : refundsOnly.length === 0 ? (
+                        <div style={{ color: '#666' }}>You have not submitted any refund requests.</div>
+                      ) : (
+                        <div style={{ display: 'grid', gap: 12 }}>
+                          {refundsOnly.map((r) => (
+                            <div key={r.id ?? `${r.reportedOnId}-${r.createdAt}`} className="report-card">
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+                                <div style={{ fontWeight: 700 }}>
+                                  {getProviderNameById(r.reportedOnId)}{r.bookingId ? ` — ${r.bookingId}` : ''}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <div style={{ color: '#666', fontSize: 12 }}>{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</div>
+                                  <div className={`report-status ${String(r.status || '').toLowerCase()}`}>{r.status}</div>
+                                </div>
+                              </div>
+                              {/* Reason text */}
+                              <div style={{ marginTop: 8, color: '#222' }}>
+                                {r.reason}
+                              </div>
+
+                              {/* Admin reply (if any). Checks several common property names */}
+                              {(r.reply || r.adminReply || r.response || r.admin_reply) && (
+                                <div className="admin-reply">
+                                  <div className="admin-reply-label">Admin reply</div>
+                                  <div className="admin-reply-text">
+                                    {r.reply ?? r.adminReply ?? r.response ?? r.admin_reply}
+                                  </div>
+
+                                  {/* optional reply timestamp if backend provides one */}
+                                  {(r.replyAt || r.repliedAt || r.replied_at) && (
+                                    <div className="admin-reply-time">
+                                      {new Date(r.replyAt ?? r.repliedAt ?? r.replied_at).toLocaleString()}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Report / Refund id */}
+                              <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                                Report ID: {r.id}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div> 
+
+                  </div>
+                )}
+              </div>
+              
               <button className="profile-wide-action-btn">
                 <FaRegComments className="profile-action-icon" /> FAQ
               </button>

@@ -2,6 +2,8 @@ package FixItNow.controller;
 
 import FixItNow.manager.*;
 import FixItNow.model.*;
+import FixItNow.repository.BookingRepository;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,18 @@ public class BookingController {
     
     @Autowired
     private UsersManager usersManager;
+    
+    @Autowired
+    private BookingRepository bookingRepository;
+
+       
+    
+    @GetMapping("/all")
+    public ResponseEntity<List<Booking>> getAllBookings() {
+        List<Booking> bookings = bookingRepository.findAll();
+        return ResponseEntity.ok(bookings);
+    }
+    
 
     @PostMapping("/create")
     public ResponseEntity<?> createBooking(
@@ -29,14 +43,13 @@ public class BookingController {
              @RequestBody Map<String, Object> payload) {
         try {
             
-             // Validate Authorization header
             if (authHeader == null || !authHeader.startsWith("Bearer ")) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(Collections.singletonMap("message", "Missing or invalid Authorization header"));
             }
             String token = authHeader.substring(7);
 
-            // Validate token and get email
+            // Validate token
             String email = usersManager.validateToken(token);
             if ("401".equals(email)) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -55,7 +68,6 @@ public class BookingController {
             String timeSlot = payload.get("timeSlot") != null ? payload.get("timeSlot").toString() : null;
             Object bookedService = payload.get("bookedServices");
 
-            // Read optional status from frontend payload (e.g., "PENDING", "CONFIRMED", "COMPLETED", etc.)
             String statusFromPayload = payload.get("status") != null ? payload.get("status").toString() : null;
 
             String customerId = (customer.getId() != null && !customer.getId().isBlank()) ? customer.getId() : customer.getId();
@@ -63,10 +75,8 @@ public class BookingController {
             
             Booking created = bookingManager.createBookingFromPayload(providerId, customerId, bookingDate, timeSlot, bookedService);
 
-            // If frontend provided a status, persist it to the booking's status column.
             if (statusFromPayload != null && !statusFromPayload.isBlank()) {
                 try {
-                    // reuse existing manager method to validate and persist the status
                     bookingManager.updateBookingStatusByString(created.getId(), statusFromPayload);
                 } catch (IllegalArgumentException iae) {
                     // status value invalid — return 400 with message
@@ -92,14 +102,12 @@ public class BookingController {
     
     @GetMapping("/provider/me")
     public ResponseEntity<?> getBookingsForAuthenticatedProvider(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        // Validate Authorization header
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Collections.singletonMap("message", "Missing or invalid Authorization header"));
         }
         String token = authHeader.substring(7);
 
-        // Validate token and obtain email using same pattern as ServicesController
         String email = usersManager.validateToken(token);
         if ("401".equals(email)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -112,7 +120,7 @@ public class BookingController {
                     .body(Collections.singletonMap("message", "Authenticated provider not found"));
         }
 
-        // Fetch and return bookings for this provider
+        // Fetch and return bookings for provider
         List<Map<String, Object>> bookings = bookingManager.getBookingsForProvider(provider);
         return ResponseEntity.ok(bookings);
     }
@@ -121,14 +129,13 @@ public class BookingController {
     
     @GetMapping("/customer/me")
     public ResponseEntity<?> getBookingsForAuthenticatedCustomer(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        // Validate Authorization header
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Collections.singletonMap("message", "Missing or invalid Authorization header"));
         }
         String token = authHeader.substring(7);
 
-        // Validate token and get email
+        // Validate token 
         String email = usersManager.validateToken(token);
         if ("401".equals(email)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -151,14 +158,13 @@ public class BookingController {
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestBody Map<String, Object> payload
     ) {
-        // Basic header validation
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Collections.singletonMap("message", "Missing or invalid Authorization header"));
         }
         String token = authHeader.substring(7);
 
-        // Validate token and get email
+        // Validate token
         String email = usersManager.validateToken(token);
         if ("401".equals(email)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -171,11 +177,9 @@ public class BookingController {
                     .body(Collections.singletonMap("message", "Authenticated user not found"));
         }
 
-        // Read payload (no extra DTO as requested)
         String bookingId = payload.get("bookingId") != null ? payload.get("bookingId").toString() : null;
         String status = payload.get("status") != null ? payload.get("status").toString() : null;
 
-        // <<-- NEW: validate bookingId and status BEFORE calling repository/manager to avoid server errors
         if (bookingId == null || bookingId.isBlank()) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", "bookingId is required"));
         }
@@ -183,7 +187,6 @@ public class BookingController {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", "status is required"));
         }
 
-        // debug log to help trace server-side issues (remove or replace with real logger in prod)
         System.out.println("updateBookingStatus called by user=" + authUser.getId() + " bookingId=" + bookingId + " status=" + status);
 
         try {
@@ -195,14 +198,12 @@ public class BookingController {
             }
             Booking booking = opt.get();
 
-            // Authorization: only provider of this booking can update status
             Users provider = booking.getProvider();
             if (provider == null || !provider.getId().equals(authUser.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(Collections.singletonMap("message", "Not allowed to update this booking"));
             }
 
-            // Delegate to manager (will validate status string)
             Booking updated = bookingManager.updateBookingStatusByString(bookingId, status);
 
             return ResponseEntity.ok(Collections.singletonMap("message", "Booking status updated"));

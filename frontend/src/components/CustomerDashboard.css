@@ -1,4 +1,4 @@
-/* Dashboard root & sidebar styling */
+/* Dashboard root */
 .dashboard-root {
   display: flex;
   min-height: 100vh;
@@ -21,87 +21,10 @@
   }
 }
 
-.sidebar {
-  width: 250px;
-  background: rgba(255, 255, 255, 0.99);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 2rem 1rem 1rem 1rem;
-  box-shadow: 2px 0 16px rgba(80, 36, 143, 0.09);
-}
 
-.sidebar-title {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #6b46c1;
-  margin-bottom: 2rem;
-}
-
-.sidebar-subtitle {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #4834d4;
-  margin-bottom: 1.2rem;
-}
-
-.sidebar-nav {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 1.2rem;
-  margin-bottom: auto;
-}
-
-.sidebar-nav button {
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  font-size: 1.1rem;
-  color: #4a5568;
-  padding: 0.7rem 1rem;
-  border-radius: 0.8rem;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-
-.sidebar-nav button.active,
-.sidebar-nav button:hover {
-  background: linear-gradient(135deg, #6b46c1, #2b6cb0);
-  color: #fff;
-}
-
-.sidebar-bottom {
-  width: 100%;
-  margin-top: 2rem;
-  display: flex;
-  justify-content: center;
-}
-
-.logout-button {
-  width: 100%;
-  padding: 0.8rem 1rem;
-  background: #e53e3e;
-  color: white;
-  border: none;
-  border-radius: 0.8rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.8rem;
-  cursor: pointer;
-  transition: background 0.3s, transform 0.3s;
-}
-
-.logout-button:hover {
-  background: #c53030;
-  transform: translateY(-2px);
+:root {
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 72px;
 }
 
 /* Main dashboard styling */
@@ -109,6 +32,12 @@
   flex: 1;
   padding: 2.5rem 3rem;
   overflow: auto;
+  transition: margin-left 220ms ease;
+  margin-left: var(--sidebar-width);
+}
+
+body.sidebar-collapsed .dashboard-main {
+  margin-left: var(--sidebar-collapsed-width);
 }
 
 .dashboard-header {
@@ -413,18 +342,10 @@
   gap: 2.3rem;
 }
 
-.profile-info-box {
-  background: white;
-  border-radius: 1rem;
-  box-shadow: 0 4px 10px rgba(107, 70, 193, 0.09);
-  display: flex;
-  align-items: center;
-  gap: 2.2rem;
-  min-width: 350px;
-  max-width: 650px;
-  width: 100%;
-  padding: 2rem 2.5rem;
-  margin-bottom: 0.5rem;
+
+.profile-info-box
+.wide-profile-box {
+  align-items: flex-start;
 }
 
 .profile-info-left {
@@ -492,7 +413,6 @@
 /* Profile actions box */
 .profile-actions-box {
   width: 100%;
-  max-width: 650px;
   background: white;
   border-radius: 1rem;
   box-shadow: 0 4px 10px rgba(107, 70, 193, 0.09);
@@ -599,11 +519,6 @@
     padding: 1.2rem 0.5rem;
   }
 
-  .sidebar {
-    width: 210px;
-    padding: 1.2rem 0.5rem 0.5rem 0.5rem;
-  }
-
   .profile-info-box,
   .profile-actions-box {
     max-width: 98vw;
@@ -614,25 +529,6 @@
 @media (max-width: 768px) {
   .dashboard-root {
     flex-direction: column;
-  }
-
-  .sidebar {
-    width: 100%;
-    flex-direction: row;
-    padding: 1rem 0.5rem;
-    box-shadow: none;
-    border-bottom: 1px solid #e2e8f0;
-    justify-content: space-between;
-  }
-
-  .sidebar-title {
-    margin-bottom: 0;
-  }
-
-  .sidebar-nav {
-    flex-direction: row;
-    gap: 0.4rem;
-    margin-bottom: 0;
   }
 
   .dashboard-main {
@@ -646,4 +542,161 @@
     max-width: 98vw;
     padding: 1.2rem 0.8rem;
   }
+}
+
+.report-container {
+  margin-top: 0.75rem;
+  
+}
+
+/* The form box */
+.report-form {
+  margin-top: 0.75rem;
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+  width: 100%;
+}
+
+/* Field wrapper */
+.report-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.75rem;
+}
+
+/* Labels */
+.report-label {
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+  color: #222;
+}
+
+/* Inputs */
+.report-form select,
+.report-form textarea {
+  border: 1px solid #e6e6ea;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Actions row */
+.report-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-start;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.report-submit-btn {
+  background: #2b6cb0;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.report-cancel-btn {
+  background: transparent;
+  color: #333;
+  border: 1px solid #e6e6ea;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.report-submit-btn[disabled],
+.report-cancel-btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Report card base (you already have some inline styles; this matches them) */
+.report-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
+  border: 1px solid #f1f5f9;
+}
+
+/* Status badge */
+.report-status {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+/* status-specific colors */
+.report-status.pending {
+  background: #f6ad55;
+}
+
+/* orange */
+.report-status.approved {
+  background: #48bb78;
+}
+
+/* green */
+.report-status.rejected {
+  background: #f56565;
+}
+
+/* red */
+.report-status.in_progress {
+  background: #63b3ed;
+}
+
+/* blue */
+.report-status.completed {
+  background: #68d391;
+}
+
+/* light green */
+
+/* fallback */
+.report-status[class="report-status"] {
+  background: #94a3b8;
+}
+
+/* Admin reply block inside report / refund cards */
+.admin-reply {
+  margin-top: 10px;
+  background: #f8fafc;
+  /* pale background */
+  border-left: 3px solid #2b6cb0;
+  /* colored accent */
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #0f172a;
+}
+
+.admin-reply-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.admin-reply-text {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  /* preserve newlines if reply has them */
+}
+
+.admin-reply-time {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6b7280;
 }

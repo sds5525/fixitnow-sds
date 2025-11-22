@@ -3,6 +3,7 @@ package FixItNow.controller;
 import FixItNow.manager.ServicesManager;
 import FixItNow.manager.UsersManager;
 import FixItNow.model.Services;
+import FixItNow.model.ServicesVerified;
 import FixItNow.model.Users;
 import FixItNow.model.UserRole;
 import FixItNow.repository.ServicesRepository;
@@ -19,6 +20,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @CrossOrigin(origins = "*")
 
@@ -41,9 +43,8 @@ public class ServicesController {
     public List<Services> getAllServices() {
         return servicesRepository.findAll();
     }
+     
     
-    
-
     // Get services for a specific provider
     @GetMapping("/provider/{providerId}")
     public List<Services> getServicesByProvider(@PathVariable String providerId) {
@@ -87,15 +88,12 @@ public class ServicesController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Collections.singletonMap("message", "Service not found"));
         }
-        // Assuming one service per provider, adjust if multiple
         Services service = servicesList.get(0);
         
         ObjectMapper mapper = new ObjectMapper();
 
-        // If availability is stored as JSON string, parse it back to a Map
         Map<String, Object> response = new HashMap<>();
         response.put("description", service.getDescription());
-        // If availability is stored as JSON string:
         try {
         	
         	Map<String, String> availability = mapper.readValue(service.getAvailability(), new TypeReference<Map<String, String>>() {});
@@ -106,23 +104,55 @@ public class ServicesController {
         
         response.put("category", service.getCategory());
 
-        // NEW: subcategories (deserialize JSON stored in TEXT column to a Map)
         try {
             String subJson = service.getSubcategory();
             if (subJson == null || subJson.trim().isEmpty()) {
                 response.put("subcategories", new HashMap<>());
             } else {
-                // deserialize into Map<String, Object> so prices can be numbers
                 Map<String, Object> subMap = mapper.readValue(subJson, new TypeReference<Map<String, Object>>() {});
                 response.put("subcategories", subMap);
             }
         } catch (Exception e) {
-            // fallback to empty map on parse error
             response.put("subcategories", new HashMap<>());
         }
         
         
         return ResponseEntity.ok(response);
+    }
+    
+    
+    @PutMapping("/{id}/verify")
+    public ResponseEntity<?> updateServiceVerified(
+            @PathVariable("id") String id,
+            @RequestBody Map<String, Object> body) {
+
+        Object verifiedObj = body.get("verified");
+        if (verifiedObj == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Missing 'verified' in body"));
+        }
+
+        Optional<Services> opt = servicesRepository.findById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        Services service = opt.get();
+
+        ServicesVerified newStatus;
+        if (verifiedObj instanceof Boolean) {
+            boolean b = (Boolean) verifiedObj;
+            newStatus = b ? ServicesVerified.APPROVED : ServicesVerified.REJECTED;
+        } else {
+            try {
+                newStatus = ServicesVerified.valueOf(String.valueOf(verifiedObj).toUpperCase());
+            } catch (IllegalArgumentException ex) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Invalid verified value"));
+            }
+        }
+
+        service.setVerified(newStatus);
+        servicesRepository.save(service);
+
+        return ResponseEntity.ok(Map.of("id", id, "verified", newStatus.name()));
     }
     
     
