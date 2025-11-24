@@ -18,7 +18,7 @@ public class CorsConfig {
 
         config.setAllowedOrigins(List.of(
             "http://localhost:3000",            
-            "https://your-frontend.vercel.app"  // production - replace with your real Vercel URL
+            "https://fixitnow-frontend.up.railway.app"  // production - replace with your real Vercel URL
         ));
 
         // Allowed HTTP methods, include OPTIONS for preflight
